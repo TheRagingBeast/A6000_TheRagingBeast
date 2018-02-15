@@ -87,4 +87,7 @@ obj-y				+= psci.o
 obj-$(CONFIG_SMP)		+= psci_smp.o
 endif
 
+obj-y += alucard_hotplug.o
+obj-y += fastchg.o
+
 extra-y := $(head-y) vmlinux.lds
