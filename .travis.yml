@@ -3,7 +3,7 @@ sudo: required
 before_install:
 - sudo apt-get install zip
 - sudo apt install ccache
-- git clone --recursive https://github.com/varunhardgamer/TheRagingBeast_Minimal_A6000 -b master ~/trb
+- git clone --recursive https://github.com/varunhardgamer/-LA.BR.1.2.9-04510-8x16.0-TheRagingBeast_A6000 -b lineage-15.1 ~/trb
 - git clone --recursive https://github.com/varunhardgamer/SaberMod_GCC_4.8.2_arm-eabi ~/trb/tc
 - git clone --recursive https://github.com/varunhardgamer/LazyFlasher ~/trb/lf
 script:
