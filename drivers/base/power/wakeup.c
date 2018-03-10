@@ -48,7 +48,7 @@ static bool enable_ps_ws = false;
 module_param(enable_ps_ws, bool, 0644);
 static bool enable_bam_dmux_wakelock_ws = false;
 module_param(enable_bam_dmux_wakelock_ws, bool, 0644);
-static bool enable_PowerManagerServiceDisplay_ws = false;
+static bool enable_PowerManagerServiceDisplay_ws = true;
 module_param(enable_PowerManagerServiceDisplay_ws, bool, 0644);
 static bool enable_PowerManagerServiceWakelocks_ws = true;
 module_param(enable_PowerManagerServiceWakelocks_ws, bool, 0644);
