@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, 2018 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,6 +40,8 @@
 #include <soc/qcom/rpm-smd.h>
 #include <soc/qcom/scm.h>
 #include <linux/sched/rt.h>
+#include <linux/debugfs.h>
+#include <linux/pm_opp.h>
 
 #define CREATE_TRACE_POINTS
 #define TRACE_MSM_THERMAL
@@ -580,6 +582,52 @@ void devmgr_unregister_mitigation_client(struct device *dev,
 	if (dev_mgr->update)
 		dev_mgr->update(dev_mgr);
 }
+
+#define PSM_REG_MODE_FROM_ATTRIBS(attr) \
+	(container_of(attr, struct psm_rail, mode_attr));
+
+#define DEFAULT_POLLING_MS	250
+/* last 3 minutes based on 250ms polling cycle */
+#define MAX_HISTORY_SZ		((3*60*1000) / DEFAULT_POLLING_MS)
+ 
+struct msm_thermal_stat_data {
+ 	int32_t temp_history[MAX_HISTORY_SZ];
+ 	uint32_t throttled;
+ 	uint32_t warning;
+ 	uint32_t normal;
+};
+static struct msm_thermal_stat_data msm_thermal_stats;
+ 
+/* module parameters */
+module_param_named(poll_ms, msm_thermal_info.poll_ms, uint, 0664);
+module_param_named(limit_temp_degC, msm_thermal_info.limit_temp_degC,
+			int, 0664);
+module_param_named(freq_control_mask, msm_thermal_info.bootup_freq_control_mask,
+			uint, 0664);
+module_param_named(core_limit_temp_degC, msm_thermal_info.core_limit_temp_degC,
+			int, 0664);
+module_param_named(core_control_mask, msm_thermal_info.core_control_mask,
+			uint, 0664);
+
+/* extended module parameters */
+module_param_named(temp_hysteresis_degC, msm_thermal_info.temp_hysteresis_degC,
+                        int, 0664);
+module_param_named(freq_step, msm_thermal_info.bootup_freq_step,
+			uint, 0644);
+module_param_named(core_temp_hysteresis_degC, msm_thermal_info.core_temp_hysteresis_degC,
+                        int, 0664);
+module_param_named(hotplug_temp, msm_thermal_info.hotplug_temp_degC,
+			uint, 0644);
+module_param_named(thermal_limit_high, limit_idx_high,
+			int, 0664);
+module_param_named(thermal_limit_low, limit_idx_low,
+ 			int, 0664);
+module_param_named(hotplug_temp_hysteresis, msm_thermal_info.hotplug_temp_hysteresis_degC,
+			uint, 0644);
+module_param_named(psm_temp, msm_thermal_info.psm_temp_degC,
+			uint, 0644);
+module_param_named(psm_temp_hysteresis, msm_thermal_info.psm_temp_hyst_degC,
+			uint, 0644);
 
 static int  msm_thermal_cpufreq_callback(struct notifier_block *nfb,
 		unsigned long event, void *data)
@@ -2669,6 +2717,8 @@ static void check_temp(struct work_struct *work)
 	int ret = 0;
 
 	do_therm_reset();
+        if (!msm_thermal_probed)
+ 		return;
 
 	ret = therm_get_temp(msm_thermal_info.sensor_id, THERM_TSENS_ID, &temp);
 	if (ret) {
@@ -3023,6 +3073,67 @@ int msm_thermal_get_freq_plan_size(uint32_t cluster, unsigned int *table_len)
 
 	pr_err("Invalid cluster ID:%d\n", cluster);
 	return -EINVAL;
+}
+
+int msm_thermal_get_cluster_voltage_plan(uint32_t cluster, uint32_t *table_ptr)
+{
+	int i = 0, corner = 0;
+	struct opp *opp = NULL;
+	unsigned int table_len = 0;
+	struct device *cpu_dev = NULL;
+	struct cluster_info *cluster_ptr = NULL;
+
+	if (!core_ptr) {
+		pr_err("Topology ptr not initialized\n");
+		return -ENODEV;
+	}
+	if (!table_ptr) {
+		pr_err("Invalid input\n");
+		return -EINVAL;
+	}
+	if (!freq_table_get)
+		check_freq_table();
+
+	for (i = 0; i < core_ptr->entity_count; i++) {
+		cluster_ptr = &core_ptr->child_entity_ptr[i];
+		if (cluster_ptr->cluster_id == cluster)
+			break;
+	}
+	if (i == core_ptr->entity_count) {
+		pr_err("Invalid cluster ID:%d\n", cluster);
+		return -EINVAL;
+	}
+	if (!cluster_ptr->freq_table) {
+		pr_err("Cluster%d clock plan not initialized\n", cluster);
+		return -EINVAL;
+	}
+
+	cpu_dev = get_cpu_device(first_cpu(cluster_ptr->cluster_cores));
+	table_len =  cluster_ptr->freq_idx_high + 1;
+
+	rcu_read_lock();
+	for (i = 0; i < table_len; i++) {
+		opp = dev_pm_opp_find_freq_exact(cpu_dev,
+			cluster_ptr->freq_table[i].frequency * 1000, true);
+		if (IS_ERR(opp)) {
+			pr_err("Error on OPP freq :%d\n",
+				cluster_ptr->freq_table[i].frequency);
+			return -EINVAL;
+		}
+		corner = dev_pm_opp_get_voltage(opp);
+		if (corner == 0) {
+			pr_err("Bad voltage corner for OPP freq :%d\n",
+				cluster_ptr->freq_table[i].frequency);
+			return -EINVAL;
+		}
+		table_ptr[i] = corner / 1000;
+		pr_debug("Cluster:%d freq:%d Khz voltage:%d mV\n",
+			cluster, cluster_ptr->freq_table[i].frequency,
+			table_ptr[i]);
+	}
+	rcu_read_unlock();
+
+	return 0;
 }
 
 int msm_thermal_get_cluster_freq_plan(uint32_t cluster, unsigned int *table_ptr)
@@ -3790,17 +3901,25 @@ static int __ref set_enabled(const char *val, const struct kernel_param *kp)
 {
 	int ret = 0;
 
-	ret = param_set_bool(val, kp);
-	if (!enabled)
+	if (*val == '0' || *val == 'n' || *val == 'N') {
+ 		enabled = 0;
 		interrupt_mode_init();
-	else
-		pr_info("no action for enabled = %d\n",
-			enabled);
+	pr_info("%s: msm_thermal disabled!\n", KBUILD_MODNAME);
+ 	} else {
+ 		if (!enabled) {
+ 			enabled = 1;
+ 			schedule_delayed_work(&check_temp_work,
+ 				msecs_to_jiffies(msm_thermal_info.poll_ms));
+ 			pr_info("%s: rescheduling...\n", KBUILD_MODNAME);
+ 		} else
+ 			pr_info("%s: already running...\n", KBUILD_MODNAME);
+ 	}
 
 	pr_info("enabled = %d\n", enabled);
 
 	return ret;
 }
+
 
 static struct kernel_param_ops module_ops = {
 	.set = set_enabled,
@@ -3950,6 +4069,83 @@ static __init int msm_thermal_add_cc_nodes(void)
 done_cc_nodes:
 	if (cc_kobj)
 		kobject_del(cc_kobj);
+	return ret;
+}
+
+static ssize_t show_thermal_stats(struct kobject *kobj,
+                struct kobj_attribute *attr, char *buf)
+{
+
+	int i = 0;
+	int tmp = 0;
+
+	/* clear out old stats */
+	msm_thermal_stats.throttled = 0;
+	msm_thermal_stats.warning = 0;
+	msm_thermal_stats.normal = 0;
+
+	for (i = 0; i < MAX_HISTORY_SZ; i++) {
+		tmp = msm_thermal_stats.temp_history[i];
+		if (tmp >= msm_thermal_info.limit_temp_degC)
+			msm_thermal_stats.throttled++;
+		else if (tmp < msm_thermal_info.limit_temp_degC &&
+			 tmp >= (msm_thermal_info.limit_temp_degC -
+				 msm_thermal_info.temp_hysteresis_degC))
+			msm_thermal_stats.warning++;
+		else
+			msm_thermal_stats.normal++;
+	}
+        return snprintf(buf, PAGE_SIZE, "%u %u %u\n",
+			msm_thermal_stats.throttled,
+			msm_thermal_stats.warning,
+			msm_thermal_stats.normal);
+}
+
+static __refdata struct kobj_attribute msm_thermal_stat_attr =
+__ATTR(statistics, 0444, show_thermal_stats, NULL);
+
+static __refdata struct attribute *msm_thermal_stat_attrs[] = {
+        &msm_thermal_stat_attr.attr,
+        NULL,
+};
+
+static __refdata struct attribute_group msm_thermal_stat_attr_group = {
+        .attrs = msm_thermal_stat_attrs,
+};
+
+static __init int msm_thermal_add_stat_nodes(void)
+{
+	struct kobject *module_kobj = NULL;
+	struct kobject *stat_kobj = NULL;
+	int ret = 0;
+
+	module_kobj = kset_find_obj(module_kset, KBUILD_MODNAME);
+	if (!module_kobj) {
+		pr_err("%s: cannot find kobject for module\n",
+			KBUILD_MODNAME);
+		ret = -ENOENT;
+		goto done_stat_nodes;
+	}
+
+	stat_kobj = kobject_create_and_add("thermal_stats", module_kobj);
+	if (!stat_kobj) {
+		pr_err("%s: cannot create core control kobj\n",
+				KBUILD_MODNAME);
+		ret = -ENOMEM;
+		goto done_stat_nodes;
+	}
+
+    ret = sysfs_create_group(stat_kobj, &msm_thermal_stat_attr_group);
+	if (ret) {
+		pr_err("%s: cannot create group\n", KBUILD_MODNAME);
+		goto done_stat_nodes;
+	}
+
+	return 0;
+
+done_stat_nodes:
+	if (stat_kobj)
+		kobject_del(stat_kobj);
 	return ret;
 }
 
@@ -4197,14 +4393,15 @@ int msm_thermal_init(struct msm_thermal_data *pdata)
 	}
 
 	enabled = 1;
-	polling_enabled = 1;
+	pr_info("%s: polling enabled!\n", KBUILD_MODNAME);
+	polling_enabled = 0;
 	ret = cpufreq_register_notifier(&msm_thermal_cpufreq_notifier,
 			CPUFREQ_POLICY_NOTIFIER);
 	if (ret)
 		pr_err("cannot register cpufreq notifier. err:%d\n", ret);
 
 	INIT_DELAYED_WORK(&check_temp_work, check_temp);
-	schedule_delayed_work(&check_temp_work, 0);
+	schedule_delayed_work(&check_temp_work, msecs_to_jiffies(10000));
 
 	if (num_possible_cpus() > 1)
 		register_cpu_notifier(&msm_thermal_cpu_notifier);
@@ -5353,6 +5550,8 @@ static int msm_thermal_dev_probe(struct platform_device *pdev)
 	struct device_node *node = pdev->dev.of_node;
 	struct msm_thermal_data data;
 
+        pr_info("%s: msm_thermal_dev_probe begin...\n", KBUILD_MODNAME);
+
 	memset(&data, 0, sizeof(struct msm_thermal_data));
 	data.pdev = pdev;
 
@@ -5453,6 +5652,8 @@ static int msm_thermal_dev_probe(struct platform_device *pdev)
 	ret = msm_thermal_init(&data);
 	msm_thermal_probed = true;
 
+        pr_info("%s: msm_thermal_dev_probe completed!\n", KBUILD_MODNAME);
+
 	if (interrupt_mode_enable) {
 		interrupt_mode_init();
 		interrupt_mode_enable = false;
@@ -5463,6 +5664,7 @@ fail:
 	if (ret)
 		pr_err("Failed reading node=%s, key=%s. err:%d\n",
 			node->full_name, key, ret);
+                pr_info("%s: msm_thermal_dev_probe failed!\n", KBUILD_MODNAME);
 
 	return ret;
 }
@@ -5472,6 +5674,7 @@ static int msm_thermal_dev_exit(struct platform_device *inp_dev)
 	int i = 0;
 
 	msm_thermal_ioctl_cleanup();
+        pr_info("msm_thermal_dev: removed!\n");
 	if (thresh) {
 		if (therm_reset_enabled)
 			sensor_mgr_remove_threshold(&inp_dev->dev,
@@ -5545,7 +5748,13 @@ int __init msm_thermal_late_init(void)
 	msm_thermal_add_mx_nodes();
 	interrupt_mode_init();
 	create_cpu_topology_sysfs();
+        msm_thermal_add_stat_nodes();
 	return 0;
 }
 late_initcall(msm_thermal_late_init);
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Praveen Chidambaram <pchidamb@codeaurora.org>");
+MODULE_AUTHOR("Paul Reioux <reioux@gmail.com>");
+MODULE_DESCRIPTION("Based on intelligent thermal driver version 2 for Qualcomm based SOCs");
+MODULE_DESCRIPTION("originally from Qualcomm's open source repo");
 

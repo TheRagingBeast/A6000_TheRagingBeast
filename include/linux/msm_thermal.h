@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015, 2018 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,10 +24,6 @@
 #define CPU1_DEVICE     "cpu1"
 #define CPU2_DEVICE     "cpu2"
 #define CPU3_DEVICE     "cpu3"
-#define CPU4_DEVICE     "cpu4"
-#define CPU5_DEVICE     "cpu5"
-#define CPU6_DEVICE     "cpu6"
-#define CPU7_DEVICE     "cpu7"
 #define CPUFREQ_MAX_NO_MITIGATION     UINT_MAX
 #define CPUFREQ_MIN_NO_MITIGATION     0
 #define HOTPLUG_NO_MITIGATION(_mask)  cpumask_clear(_mask)
@@ -249,6 +245,8 @@ extern int devmgr_client_request_mitigation(struct device_clnt_data *clnt,
 extern void devmgr_unregister_mitigation_client(
 					struct device *dev,
 					struct device_clnt_data *clnt);
+extern int msm_thermal_get_cluster_voltage_plan(uint32_t cluster,
+	uint32_t *table_ptr);
 #else
 static inline int msm_thermal_init(struct msm_thermal_data *pdata)
 {
@@ -319,6 +317,11 @@ static inline void devmgr_unregister_mitigation_client(
 					struct device *dev,
 					struct device_clnt_data *clnt)
 {
+}
+static inline int msm_thermal_get_cluster_voltage_plan(uint32_t cluster,
+	uint32_t *table_ptr);
+{
+	return -ENOSYS;
 }
 #endif
 
