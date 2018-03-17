@@ -311,6 +311,11 @@ config CMA_RESERVE_DEFAULT_AREA
 
 	  If unsure, say n.
 
+config FW_CACHE
+       bool "Enable firmware caching during suspend"
+       depends on PM_SLEEP
+       default n
+
 endif
 
 endmenu

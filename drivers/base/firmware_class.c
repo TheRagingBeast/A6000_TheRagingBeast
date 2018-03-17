@@ -1060,6 +1060,23 @@ static int fw_load_from_user_helper(struct firmware *firmware,
 	fw_priv->buf = firmware->priv;
 	return _request_firmware_load(fw_priv, desc->uevent, timeout);
 }
+
+#ifdef CONFIG_FW_CACHE
+ /* kill pending requests without uevent to avoid blocking suspend */
+ static void kill_requests_without_uevent(void)
+ {
+ 	struct firmware_buf *buf;
+ 	struct firmware_buf *next;
+ 
+ 	mutex_lock(&fw_lock);
+ 	list_for_each_entry_safe(buf, next, &pending_fw_head, pending_list) {
+ 		if (!buf->need_uevent)
+ 			 __fw_load_abort(buf);
+ 	}
+ 	mutex_unlock(&fw_lock);
+ }
+#endif
+
 #else /* CONFIG_FW_LOADER_USER_HELPER */
 static inline int
 fw_load_from_user_helper(struct firmware *firmware, const char *name,
@@ -1519,7 +1536,7 @@ int uncache_firmware(const char *fw_name)
 	return -EINVAL;
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_FW_CACHE
 static ASYNC_DOMAIN_EXCLUSIVE(fw_cache_domain);
 
 static struct fw_cache_entry *alloc_fw_cache_entry(const char *name)
@@ -1785,7 +1802,7 @@ static void __init fw_cache_init(void)
 	INIT_LIST_HEAD(&fw_cache.head);
 	fw_cache.state = FW_LOADER_NO_CACHE;
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_FW_CACHE
 	spin_lock_init(&fw_cache.name_lock);
 	INIT_LIST_HEAD(&fw_cache.fw_names);
 
@@ -1811,7 +1828,7 @@ static int __init firmware_class_init(void)
 
 static void __exit firmware_class_exit(void)
 {
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_FW_CACHE
 	unregister_syscore_ops(&fw_syscore_ops);
 	unregister_pm_notifier(&fw_cache.pm_notify);
 #endif
