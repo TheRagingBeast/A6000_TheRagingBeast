@@ -3,8 +3,9 @@ sudo: required
 before_install:
 - sudo apt-get install zip
 - sudo apt install ccache
-- git clone --recursive https://github.com/TheRagingBeast/A6000_TheRagingBeast -b lineage-15.1 ~/trb
-- git clone --recursive https://github.com/varunhardgamer/SaberMod_GCC_4.8.2_arm-eabi ~/trb/tc
+- sudo apt install liblz4-tool
+- git clone --recursive https://github.com/TheRagingBeast/A6000_TheRagingBeast -b dms ~/trb
+- git clone --recursive git clone https://github.com/DhirajSurvase/GCC_4.8 ~/trb/tc
 script:
 - cd ~/trb
 - chmod a+x ~/trb/tc
