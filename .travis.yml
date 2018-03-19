@@ -5,7 +5,7 @@ before_install:
 - sudo apt install ccache
 - sudo apt install liblz4-tool
 - git clone --recursive https://github.com/TheRagingBeast/A6000_TheRagingBeast -b dms ~/trb
-- git clone --recursive git clone https://github.com/DhirajSurvase/GCC_4.8 ~/trb/tc
+- git clone git clone https://github.com/DhirajSurvase/GCC_4.8 ~/trb/tc
 script:
 - cd ~/trb
 - chmod a+x ~/trb/tc
