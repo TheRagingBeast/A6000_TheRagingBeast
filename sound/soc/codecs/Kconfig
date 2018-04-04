@@ -172,7 +172,6 @@ config SND_SOC_WM_HUBS
 
 config SND_SOC_WM_ADSP
 	tristate
-	default y if SND_SOC_VEGAS=y
 	default y if SND_SOC_WM5102=y
 	default y if SND_SOC_FLORIDA=y
 	default y if SND_SOC_CLEARWATER=y
@@ -180,7 +179,6 @@ config SND_SOC_WM_ADSP
 	default y if SND_SOC_WM2200=y
 	default y if SND_SOC_LARGO=y
 	default y if SND_SOC_MARLEY=y
-	default y if SND_SOC_VEGAS=m
 	default m if SND_SOC_WM5102=m
 	default m if SND_SOC_FLORIDA=m
 	default m if SND_SOC_CLEARWATER=m
@@ -634,9 +632,3 @@ config SND_SOC_MSM_HDMI_CODEC_RX
 	help
 	HDMI audio drivers should be built only if the platform
         supports hdmi panel.
-
-config PHANTOM_GAIN_CONTROL
-       bool "Port Of Flar's Sound Codec for msm8916-wcd"
-       help
-       A simple Port Of flar's Sound Driver from Tom-Tom Sound sc
-       to msm8916-wcd
